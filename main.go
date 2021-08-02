@@ -1,8 +1,17 @@
 package main
 
 import (
+	"fmt"
+	"log"
+	"math"
+	"strconv"
+	"time"
+
+	"github.com/getlantern/systray"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/mem"
 )
 
 type User struct {
@@ -14,6 +23,7 @@ type User struct {
 var Users []User
 
 func main() {
+	systray.Run(onReady, onExit)
 	server := gin.Default()
 	server.GET("/", running)
 	usersRoutes := server.Group("/users")
@@ -35,7 +45,9 @@ func ListUsers(c *gin.Context) {
 	c.JSON(200, Users)
 }
 func CreateUser(c *gin.Context) {
+
 	var reqBody User
+	c.Request.Context().Done()
 	if err := c.ShouldBindJSON(&reqBody); err != nil {
 		c.JSON(422, gin.H{
 			"error":   true,
@@ -98,4 +110,67 @@ func DeleteUser(c *gin.Context) {
 		"message": "invalid user id",
 	})
 
+}
+
+func onReady() {
+	model, numberOfCore, frequency, cacheSize := getInfo()
+	go func() {
+		var result string
+		for {
+			result = getData()
+			systray.SetTitle(result)
+		}
+
+	}()
+	systray.AddMenuItem(fmt.Sprintf("CPU            : %s", model), "Cpu Model")
+	systray.AddMenuItem(fmt.Sprintf("Cores          : %74s", strconv.Itoa(int(numberOfCore))), "Number of core")
+	systray.AddMenuItem(fmt.Sprintf("Frequency  : %70s", strconv.Itoa(frequency)), "Frequency CPU")
+	systray.AddMenuItem(fmt.Sprintf("CPU Cache : %71s", strconv.Itoa(int(cacheSize))), "CPU Cache")
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Quit", "Quits this app")
+	go func() {
+		for {
+			select {
+			case <-mQuit.ClickedCh:
+				systray.Quit()
+				return
+			}
+
+		}
+
+	}()
+}
+
+func onExit() {
+
+}
+
+func getMemoryUsage() int {
+	memory, err := mem.VirtualMemory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return int(math.Ceil(memory.UsedPercent))
+}
+
+func getCpuUsage() int {
+	percent, err := cpu.Percent(time.Second, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return int(math.Ceil(percent[0]))
+}
+
+func getData() string {
+	cpuData := "Cpu: " + strconv.Itoa(getCpuUsage()) + "% "
+	memoryData := "Ram: " + strconv.Itoa(getMemoryUsage()) + "% "
+	return cpuData + memoryData
+}
+
+func getInfo() (string, int32, int, int32) {
+	info, err := cpu.Info()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return info[0].ModelName, info[0].Cores, int(info[0].Mhz), info[0].CacheSize
 }
